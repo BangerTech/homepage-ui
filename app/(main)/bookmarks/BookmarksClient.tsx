@@ -1,9 +1,12 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { ChevronDown, ChevronRight, Plus, Pencil, Trash2, X, Check } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, Pencil, Trash2, X, Check, Image as ImageIcon } from "lucide-react";
 import SaveBar from "@/components/SaveBar";
+import IconPicker from "@/components/IconPicker";
 import type { BookmarkGroup, Bookmark } from "@/types";
+
+const CDN = (n: string) => `https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons@main/png/${n.replace(".png","")}.png`;
 
 interface Props {
   initialGroups: BookmarkGroup[];
@@ -31,6 +34,7 @@ function BookmarkForm({
   onCancel: () => void;
 }) {
   const [form, setForm] = useState<Bookmark>({ ...EMPTY_BOOKMARK, ...bookmark });
+  const [showPicker, setShowPicker] = useState(false);
 
   function handleSave() {
     if (!form.name.trim() || !form.href.trim()) return;
@@ -40,25 +44,22 @@ function BookmarkForm({
     onSave(b);
   }
 
-  const inputStyle = {
-    width: "100%",
-    height: 32,
-    backgroundColor: "#0d1117",
-    border: "1px solid #30363d",
-    borderRadius: 6,
-    color: "#e6edf3",
-    padding: "0 10px",
-    fontSize: 13,
-  };
+  const iconName = form.icon?.replace(".png", "") || "";
+  const isUrl    = form.icon?.startsWith("http");
 
   return (
+    <>
+      {showPicker && (
+        <IconPicker value={form.icon || ""} onChange={(v) => setForm({ ...form, icon: v })} onClose={() => setShowPicker(false)} />
+      )}
     <div
       style={{
-        backgroundColor: "#0d1117",
-        border: "1px solid #388bfd",
-        borderRadius: 8,
-        padding: 14,
+        background: "rgba(59,130,246,0.06)",
+        border: "1px solid rgba(59,130,246,0.25)",
+        borderRadius: 12,
+        padding: 16,
         marginBottom: 8,
+        boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
       }}
     >
       <div
@@ -70,88 +71,56 @@ function BookmarkForm({
         }}
       >
         <div>
-          <label style={{ display: "block", fontSize: 12, color: "#6e7681", marginBottom: 4 }}>
+          <label style={{ display: "block", fontSize: 11, color: "#4a5568", marginBottom: 5, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
             Name *
           </label>
-          <input
-            style={inputStyle}
-            value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
-            placeholder="GitHub"
-          />
+          <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="GitHub" style={{ width: "100%", height: 34 }} />
         </div>
         <div>
-          <label style={{ display: "block", fontSize: 12, color: "#6e7681", marginBottom: 4 }}>
+          <label style={{ display: "block", fontSize: 11, color: "#4a5568", marginBottom: 5, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
             URL (href) *
           </label>
-          <input
-            style={inputStyle}
-            value={form.href}
-            onChange={(e) => setForm({ ...form, href: e.target.value })}
-            placeholder="https://github.com"
-          />
+          <input value={form.href} onChange={(e) => setForm({ ...form, href: e.target.value })} placeholder="https://github.com" style={{ width: "100%", height: 34 }} />
         </div>
         <div>
-          <label style={{ display: "block", fontSize: 12, color: "#6e7681", marginBottom: 4 }}>
+          <label style={{ display: "block", fontSize: 11, color: "#4a5568", marginBottom: 5, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
             Abbreviation
           </label>
-          <input
-            style={inputStyle}
-            value={form.abbr || ""}
-            onChange={(e) => setForm({ ...form, abbr: e.target.value })}
-            placeholder="GH"
-          />
+          <input value={form.abbr || ""} onChange={(e) => setForm({ ...form, abbr: e.target.value })} placeholder="GH" style={{ width: "100%", height: 34 }} />
         </div>
         <div>
-          <label style={{ display: "block", fontSize: 12, color: "#6e7681", marginBottom: 4 }}>
+          <label style={{ display: "block", fontSize: 11, color: "#4a5568", marginBottom: 5, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
             Icon
           </label>
-          <input
-            style={inputStyle}
-            value={form.icon || ""}
-            onChange={(e) => setForm({ ...form, icon: e.target.value })}
-            placeholder="github.png"
-          />
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <div style={{ width: 34, height: 34, borderRadius: 8, flexShrink: 0, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+              {iconName && !isUrl ? (
+                <img src={CDN(iconName)} alt="" width={22} height={22} style={{ objectFit: "contain" }} onError={(e) => { (e.currentTarget as HTMLElement).style.display = "none"; }} />
+              ) : isUrl ? (
+                <img src={form.icon} alt="" width={22} height={22} style={{ objectFit: "contain" }} onError={(e) => { (e.currentTarget as HTMLElement).style.display = "none"; }} />
+              ) : <ImageIcon size={14} style={{ color: "#4a5568" }} />}
+            </div>
+            <input value={form.icon || ""} onChange={(e) => setForm({ ...form, icon: e.target.value })} placeholder="github.png" style={{ flex: 1, height: 34 }} />
+            <button onClick={() => setShowPicker(true)} style={{ height: 34, padding: "0 10px", borderRadius: 8, flexShrink: 0, border: "1px solid rgba(59,130,246,0.3)", background: "rgba(59,130,246,0.1)", color: "#60a5fa", fontSize: 12, whiteSpace: "nowrap" }}>Browse</button>
+          </div>
         </div>
       </div>
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-        <button
-          onClick={onCancel}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 4,
-            padding: "5px 12px",
-            borderRadius: 6,
-            border: "1px solid #30363d",
-            backgroundColor: "transparent",
-            color: "#8b949e",
-            fontSize: 13,
-          }}
-        >
+        <button onClick={onCancel} style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 14px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", background: "transparent", color: "#7d8fa3", fontSize: 13 }}>
           <X size={13} /> Cancel
         </button>
-        <button
-          onClick={handleSave}
-          disabled={!form.name.trim() || !form.href.trim()}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 4,
-            padding: "5px 12px",
-            borderRadius: 6,
-            border: "none",
-            backgroundColor:
-              form.name.trim() && form.href.trim() ? "#238636" : "#21262d",
-            color: form.name.trim() && form.href.trim() ? "#fff" : "#6e7681",
-            fontSize: 13,
-            fontWeight: 600,
-          }}
-        >
+        <button onClick={handleSave} disabled={!form.name.trim() || !form.href.trim()} style={{
+          display: "flex", alignItems: "center", gap: 4, padding: "6px 14px", borderRadius: 8, border: "none",
+          background: form.name.trim() && form.href.trim() ? "linear-gradient(135deg, #065f46, #047857)" : "rgba(255,255,255,0.05)",
+          color: form.name.trim() && form.href.trim() ? "#fff" : "#4a5568",
+          fontSize: 13, fontWeight: 600,
+          boxShadow: form.name.trim() && form.href.trim() ? "0 4px 12px rgba(5,150,105,0.3)" : "none",
+        }}>
           <Check size={13} /> Save
         </button>
       </div>
     </div>
+    </>
   );
 }
 
