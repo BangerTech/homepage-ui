@@ -1,36 +1,183 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Homepage UI
 
-## Getting Started
+> A visual web editor for [gethomepage/homepage](https://github.com/gethomepage/homepage) — manage your self-hosted dashboard without touching YAML.
 
-First, run the development server:
+![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind-v4-38bdf8?logo=tailwindcss)
+![Docker](https://img.shields.io/badge/Docker-ready-2496ed?logo=docker)
+![License](https://img.shields.io/badge/license-MIT-green)
+
+---
+
+## What is this?
+
+[gethomepage/homepage](https://github.com/gethomepage/homepage) is a beautiful self-hosted dashboard — but configuring it requires manually editing YAML files. **Homepage UI** sits alongside your homepage container and gives you a clean point-and-click interface to manage everything.
+
+---
+
+## Features
+
+- **Setup Wizard** — first-run wizard to connect to your homepage config directory and Docker container
+- **Services Editor** — add, edit, delete and reorder service groups and services (including widget configuration)
+- **Bookmarks Editor** — manage bookmark groups with icons, abbreviations and URLs
+- **Widgets Editor** — configure info widgets (resources, search, weather) with typed forms
+- **Settings Editor** — edit appearance, layout groups and app configuration
+- **Custom CSS / JS** — edit `custom.css` and `custom.js` directly in the browser
+- **One-click Restart** — restart the homepage container via Docker socket after saving
+- **Dark theme** — GitHub-inspired dark UI
+
+---
+
+## Screenshots
+
+| Dashboard | Services Editor |
+|---|---|
+| ![Dashboard](https://placehold.co/480x280/0d1117/58a6ff?text=Dashboard) | ![Services](https://placehold.co/480x280/0d1117/3fb950?text=Services+Editor) |
+
+| Setup Wizard | Bookmarks Editor |
+|---|---|
+| ![Setup](https://placehold.co/480x280/0d1117/f0883e?text=Setup+Wizard) | ![Bookmarks](https://placehold.co/480x280/0d1117/a371f7?text=Bookmarks+Editor) |
+
+---
+
+## Quick Start
+
+### Prerequisites
+
+- Docker + Docker Compose
+- A running [gethomepage/homepage](https://github.com/gethomepage/homepage) container
+
+### 1. Clone the repository
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone https://github.com/BangerTech/homepage-ui.git
+cd homepage-ui
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 2. Adjust `docker-compose.yml`
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Edit the volume path to point to your homepage config directory:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```yaml
+volumes:
+  - /your/path/to/homepage/config:/app/config   # ← change this
+  - /var/run/docker.sock:/var/run/docker.sock
+  - homepage-ui-data:/app/data
+```
 
-## Learn More
+### 3. Start
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+docker compose up -d --build
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Open **http://your-server-ip:3006** in your browser and follow the setup wizard.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+---
 
-## Deploy on Vercel
+## Configuration
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+On first launch, the setup wizard will ask for:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Setting | Description | Example |
+|---|---|---|
+| **Config Path** | Path to the homepage config directory **inside this container** | `/app/config` |
+| **Container Name** | Name of your homepage Docker container | `homepage` |
+
+Settings are stored in a persistent Docker volume at `/app/data/app-settings.json`.
+
+---
+
+## docker-compose.yml (full example)
+
+```yaml
+services:
+  homepage-ui:
+    image: ghcr.io/bangertech/homepage-ui:latest   # or build: .
+    container_name: homepage-ui
+    ports:
+      - 3006:3000
+    volumes:
+      - /your/path/to/homepage/config:/app/config
+      - /var/run/docker.sock:/var/run/docker.sock
+      - homepage-ui-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  homepage-ui-data:
+```
+
+---
+
+## Tech Stack
+
+| Technology | Purpose |
+|---|---|
+| [Next.js 16](https://nextjs.org) (App Router) | Full-stack React framework |
+| [TypeScript 5](https://www.typescriptlang.org) | Type safety |
+| [Tailwind CSS v4](https://tailwindcss.com) | Styling |
+| [js-yaml](https://github.com/nodeca/js-yaml) | YAML parsing & serialization |
+| [dockerode](https://github.com/apocas/dockerode) | Docker socket API |
+| [lucide-react](https://lucide.dev) | Icons |
+
+---
+
+## API Routes
+
+| Method | Route | Description |
+|---|---|---|
+| `GET` | `/api/app-settings` | Read app settings |
+| `PUT` | `/api/app-settings` | Save app settings |
+| `GET` | `/api/config/:file` | Read a config file |
+| `PUT` | `/api/config/:file` | Write a config file |
+| `POST` | `/api/config/test` | Validate a config path |
+| `POST` | `/api/docker/restart` | Restart homepage container |
+| `POST` | `/api/docker/test` | Check if container exists |
+
+---
+
+## Development
+
+```bash
+# Requires Node.js 22+
+npm install
+npm run dev   # http://localhost:3000
+```
+
+For local development, set `DATA_PATH` to a writable directory:
+
+```bash
+export DATA_PATH="/tmp/homepage-ui-dev-data"
+mkdir -p "$DATA_PATH"
+npm run dev
+```
+
+---
+
+## Do I need to restart homepage after saving?
+
+**No.** Homepage watches its config files and reloads automatically when they change. Just hit **Save** and refresh your homepage tab. The **Save & Restart** button is only needed if homepage is unresponsive or you've changed environment-level settings.
+
+---
+
+## Contributing
+
+Pull requests are welcome! For major changes, please open an issue first.
+
+1. Fork the repo
+2. Create a feature branch (`git checkout -b feature/my-feature`)
+3. Commit your changes
+4. Push and open a Pull Request
+
+---
+
+## Author
+
+**BangerTech** — [github.com/BangerTech](https://github.com/BangerTech)
+
+---
+
+## License
+
+[MIT](LICENSE)
