@@ -1,0 +1,21 @@
+services:
+  homepage-ui:
+    build: .
+    container_name: homepage-ui
+    user: "0:0"
+    ports:
+      - 3006:3000
+    volumes:
+      - /media/docker-extern-ssd/homepage/config:/app/config
+      - /var/run/docker.sock:/var/run/docker.sock
+      - homepage-ui-data:/app/data
+    restart: unless-stopped
+    networks:
+      - proxy
+
+volumes:
+  homepage-ui-data:
+
+networks:
+  proxy:
+    external: true
