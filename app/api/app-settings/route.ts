@@ -13,7 +13,7 @@ export async function GET() {
 export async function PUT(req: NextRequest) {
   try {
     const body = (await req.json()) as AppSettings;
-    writeAppSettings({ configPath: body.configPath, containerName: body.containerName });
+    writeAppSettings({ configPath: body.configPath, containerName: body.containerName, homepageUrl: body.homepageUrl });
     return NextResponse.json({ ok: true });
   } catch (e) {
     return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });

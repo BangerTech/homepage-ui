@@ -6,6 +6,7 @@ import {
   Loader2, FolderOpen, Container, Activity, Layers,
 } from "lucide-react";
 import type { ServiceGroup, BookmarkGroup } from "@/types";
+import { useReachability } from "@/components/ReachabilityProvider";
 
 interface DockerContainer {
   id: string;
@@ -37,6 +38,7 @@ export default function DashboardClient({
   const [restartError, setRestartError]   = useState("");
   const [containers, setContainers]       = useState<DockerContainer[]>([]);
   const [containersLoading, setContainersLoading] = useState(true);
+  const { reachability, isChecking, lastChecked } = useReachability();
 
   useEffect(() => {
     fetch("/api/docker/containers")
@@ -291,29 +293,53 @@ export default function DashboardClient({
         {/* ── Service Groups overview ── */}
         {serviceGroups.length > 0 && (
           <div className="glass-card" style={{ padding: "20px 24px" }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#4a5568", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 14 }}>
-              Service Groups
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#4a5568", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                Service Groups
+              </div>
+              {lastChecked && (
+                <div style={{ fontSize: 10, color: "#4a5568", display: "flex", alignItems: "center", gap: 4 }}>
+                  {isChecking && <Loader2 size={10} style={{ animation: "spin 1s linear infinite" }} />}
+                  {!isChecking && <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#10b981", display: "inline-block" }} />}
+                  {isChecking ? "Checking..." : `Checked ${lastChecked.toLocaleTimeString()}`}
+                </div>
+              )}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 300, overflowY: "auto" }}>
-              {serviceGroups.map((group, i) => (
-                <div key={i} style={{
-                  display: "flex", alignItems: "center", justifyContent: "space-between",
-                  padding: "7px 10px", borderRadius: 8,
-                  background: "rgba(255,255,255,0.02)",
-                  border: "1px solid rgba(255,255,255,0.04)",
-                }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <Layers size={13} color="#6366f1" />
-                    <span style={{ fontSize: 13, color: "#e2e8f0" }}>{group.name}</span>
-                  </div>
-                  <span style={{
-                    background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.2)",
-                    color: "#818cf8", fontSize: 11, padding: "2px 8px", borderRadius: 10, fontWeight: 600,
+              {serviceGroups.map((group, i) => {
+                const withUrl  = group.services.filter((s) => s.href?.startsWith("http"));
+                const okCount  = withUrl.filter((s) => reachability[s.href!] === "ok").length;
+                const errCount = withUrl.filter((s) => reachability[s.href!] === "error").length;
+                const hasData  = withUrl.length > 0 && (okCount + errCount) > 0;
+
+                return (
+                  <div key={i} style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    padding: "7px 10px", borderRadius: 8,
+                    background: "rgba(255,255,255,0.02)",
+                    border: "1px solid rgba(255,255,255,0.04)",
                   }}>
-                    {group.services.length}
-                  </span>
-                </div>
-              ))}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <Layers size={13} color="#6366f1" />
+                      <span style={{ fontSize: 13, color: "#e2e8f0" }}>{group.name}</span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      {hasData && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11 }}>
+                          {okCount > 0  && <span style={{ color: "#10b981", display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981", boxShadow: "0 0 4px #10b981", display: "inline-block" }} />{okCount}</span>}
+                          {errCount > 0 && <span style={{ color: "#ef4444", display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: "#ef4444", display: "inline-block" }} />{errCount}</span>}
+                        </div>
+                      )}
+                      <span style={{
+                        background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.2)",
+                        color: "#818cf8", fontSize: 11, padding: "2px 8px", borderRadius: 10, fontWeight: 600,
+                      }}>
+                        {group.services.length}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}

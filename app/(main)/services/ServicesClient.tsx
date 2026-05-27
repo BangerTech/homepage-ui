@@ -13,10 +13,11 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   ChevronDown, ChevronRight, Plus, Pencil, Trash2,
   X, Check, GripVertical, Image as ImageIcon,
-  Wifi, WifiOff, Loader2 as Spin,
+  WifiOff, Loader2 as Spin,
 } from "lucide-react";
 import SaveBar from "@/components/SaveBar";
 import IconPicker from "@/components/IconPicker";
+import { useReachability } from "@/components/ReachabilityProvider";
 import type { ServiceGroup, Service } from "@/types";
 
 interface Props { initialGroups: ServiceGroup[]; loadError: string; }
@@ -187,7 +188,7 @@ function SortableServiceRow({
 }: {
   service: Service; groupIdx: number; serviceIdx: number;
   onEdit: () => void; onDelete: () => void;
-  reachStatus?: "checking" | "ok" | "error" | "unknown";
+  reachStatus?: "checking" | "ok" | "error";
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: `${groupIdx}-${serviceIdx}-${service.name}`,
@@ -263,8 +264,6 @@ function SortableServiceRow({
   );
 }
 
-type ReachMap = Record<string, "checking" | "ok" | "error" | "unknown">;
-
 /* ── Main component ── */
 export default function ServicesClient({ initialGroups, loadError }: Props) {
   const [groups, setGroups]             = useState<ServiceGroup[]>(initialGroups);
@@ -275,31 +274,7 @@ export default function ServicesClient({ initialGroups, loadError }: Props) {
   const [hasChanges, setHasChanges]     = useState(false);
   const [renamingGroup, setRenaming]    = useState<number | null>(null);
   const [renameValue, setRenameValue]   = useState("");
-  const [reachability, setReachability] = useState<ReachMap>({});
-  const [checking, setChecking]         = useState(false);
-
-  async function checkAllServices() {
-    const allServices = groups.flatMap((g) => g.services);
-    const urls = allServices.map((s) => s.href || "").filter((u) => u.startsWith("http"));
-    if (urls.length === 0) return;
-    setChecking(true);
-    const initialMap: ReachMap = {};
-    urls.forEach((u) => { initialMap[u] = "checking"; });
-    setReachability(initialMap);
-    try {
-      const res  = await fetch("/api/config/check-services", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ urls }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        const map: ReachMap = {};
-        for (const r of data.results) map[r.url] = r.reachable ? "ok" : "error";
-        setReachability(map);
-      }
-    } catch { setReachability({}); }
-    setChecking(false);
-  }
+  const { reachability, isChecking, lastChecked, triggerCheck } = useReachability();
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
@@ -385,18 +360,23 @@ export default function ServicesClient({ initialGroups, loadError }: Props) {
             {groups.reduce((a, g) => a + g.services.length, 0)} services across {groups.length} groups
           </p>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={checkAllServices} disabled={checking} style={{
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {lastChecked && (
+            <div style={{ fontSize: 11, color: "#4a5568", display: "flex", alignItems: "center", gap: 5 }}>
+              {isChecking
+                ? <><Spin size={11} style={{ animation: "spin 1s linear infinite" }} /> Checking...</>
+                : <><span style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981", boxShadow: "0 0 4px #10b981", display: "inline-block" }} /> {lastChecked.toLocaleTimeString()}</>}
+            </div>
+          )}
+          <button onClick={triggerCheck} disabled={isChecking} style={{
             display: "flex", alignItems: "center", gap: 6,
             padding: "8px 14px", borderRadius: 9,
             border: "1px solid rgba(16,185,129,0.25)",
             background: "rgba(16,185,129,0.08)", color: "#34d399", fontSize: 13, fontWeight: 600,
-            cursor: checking ? "not-allowed" : "pointer",
+            cursor: isChecking ? "not-allowed" : "pointer",
           }}>
-            {checking
-              ? <Spin size={14} style={{ animation: "spin 1s linear infinite" }} />
-              : <Wifi size={14} />}
-            {checking ? "Checking..." : "Check All"}
+            {isChecking ? <Spin size={14} style={{ animation: "spin 1s linear infinite" }} /> : null}
+            {isChecking ? "Checking..." : "Re-Check"}
           </button>
           <button onClick={() => setAddingGroup(true)} className="btn-glow" style={{
             display: "flex", alignItems: "center", gap: 6,
