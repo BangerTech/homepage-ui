@@ -13,6 +13,7 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   ChevronDown, ChevronRight, Plus, Pencil, Trash2,
   X, Check, GripVertical, Image as ImageIcon,
+  Wifi, WifiOff, Loader2 as Spin,
 } from "lucide-react";
 import SaveBar from "@/components/SaveBar";
 import IconPicker from "@/components/IconPicker";
@@ -182,10 +183,11 @@ function ServiceForm({ service, onSave, onCancel }: { service: Service; onSave: 
 /* ── Sortable service row ── */
 function SortableServiceRow({
   service, groupIdx, serviceIdx,
-  onEdit, onDelete,
+  onEdit, onDelete, reachStatus,
 }: {
   service: Service; groupIdx: number; serviceIdx: number;
   onEdit: () => void; onDelete: () => void;
+  reachStatus?: "checking" | "ok" | "error" | "unknown";
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: `${groupIdx}-${serviceIdx}-${service.name}`,
@@ -225,8 +227,13 @@ function SortableServiceRow({
       </div>
 
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {service.name}
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {service.name}
+          </span>
+          {reachStatus === "checking" && <Spin size={11} style={{ color: "#4a5568", animation: "spin 1s linear infinite", flexShrink: 0 }} />}
+          {reachStatus === "ok"       && <span title="Reachable" style={{ width: 7, height: 7, borderRadius: "50%", background: "#10b981", boxShadow: "0 0 5px #10b981", flexShrink: 0, display: "inline-block" }} />}
+          {reachStatus === "error"    && <span title="Not reachable"><WifiOff size={11} style={{ color: "#ef4444", flexShrink: 0 }} /></span>}
         </div>
         {service.href && (
           <div style={{ fontSize: 11, color: "#4a5568", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -256,6 +263,8 @@ function SortableServiceRow({
   );
 }
 
+type ReachMap = Record<string, "checking" | "ok" | "error" | "unknown">;
+
 /* ── Main component ── */
 export default function ServicesClient({ initialGroups, loadError }: Props) {
   const [groups, setGroups]             = useState<ServiceGroup[]>(initialGroups);
@@ -266,6 +275,31 @@ export default function ServicesClient({ initialGroups, loadError }: Props) {
   const [hasChanges, setHasChanges]     = useState(false);
   const [renamingGroup, setRenaming]    = useState<number | null>(null);
   const [renameValue, setRenameValue]   = useState("");
+  const [reachability, setReachability] = useState<ReachMap>({});
+  const [checking, setChecking]         = useState(false);
+
+  async function checkAllServices() {
+    const allServices = groups.flatMap((g) => g.services);
+    const urls = allServices.map((s) => s.href || "").filter((u) => u.startsWith("http"));
+    if (urls.length === 0) return;
+    setChecking(true);
+    const initialMap: ReachMap = {};
+    urls.forEach((u) => { initialMap[u] = "checking"; });
+    setReachability(initialMap);
+    try {
+      const res  = await fetch("/api/config/check-services", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ urls }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        const map: ReachMap = {};
+        for (const r of data.results) map[r.url] = r.reachable ? "ok" : "error";
+        setReachability(map);
+      }
+    } catch { setReachability({}); }
+    setChecking(false);
+  }
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
@@ -351,13 +385,27 @@ export default function ServicesClient({ initialGroups, loadError }: Props) {
             {groups.reduce((a, g) => a + g.services.length, 0)} services across {groups.length} groups
           </p>
         </div>
-        <button onClick={() => setAddingGroup(true)} className="btn-glow" style={{
-          display: "flex", alignItems: "center", gap: 6,
-          padding: "8px 16px", borderRadius: 9, border: "1px solid rgba(59,130,246,0.25)",
-          background: "rgba(59,130,246,0.1)", color: "#60a5fa", fontSize: 13, fontWeight: 600,
-        }}>
-          <Plus size={14} /> Add Group
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={checkAllServices} disabled={checking} style={{
+            display: "flex", alignItems: "center", gap: 6,
+            padding: "8px 14px", borderRadius: 9,
+            border: "1px solid rgba(16,185,129,0.25)",
+            background: "rgba(16,185,129,0.08)", color: "#34d399", fontSize: 13, fontWeight: 600,
+            cursor: checking ? "not-allowed" : "pointer",
+          }}>
+            {checking
+              ? <Spin size={14} style={{ animation: "spin 1s linear infinite" }} />
+              : <Wifi size={14} />}
+            {checking ? "Checking..." : "Check All"}
+          </button>
+          <button onClick={() => setAddingGroup(true)} className="btn-glow" style={{
+            display: "flex", alignItems: "center", gap: 6,
+            padding: "8px 16px", borderRadius: 9, border: "1px solid rgba(59,130,246,0.25)",
+            background: "rgba(59,130,246,0.1)", color: "#60a5fa", fontSize: 13, fontWeight: 600,
+          }}>
+            <Plus size={14} /> Add Group
+          </button>
+        </div>
       </div>
 
       <div style={{ padding: "24px 36px" }}>
@@ -445,6 +493,7 @@ export default function ServicesClient({ initialGroups, loadError }: Props) {
                             service={service} groupIdx={groupIdx} serviceIdx={serviceIdx}
                             onEdit={() => setEditing({ groupIdx, serviceIdx })}
                             onDelete={() => deleteService(groupIdx, serviceIdx)}
+                            reachStatus={service.href ? reachability[service.href] : undefined}
                           />
                         )
                       )}

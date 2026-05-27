@@ -1,6 +1,7 @@
 export interface AppSettings {
   configPath: string;
   containerName: string;
+  homepageUrl?: string;
 }
 
 export interface Service {

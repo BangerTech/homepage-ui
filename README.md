@@ -33,11 +33,11 @@
 
 | Dashboard | Services Editor |
 |---|---|
-| ![Dashboard](https://placehold.co/480x280/0d1117/58a6ff?text=Dashboard) | ![Services](https://placehold.co/480x280/0d1117/3fb950?text=Services+Editor) |
+| ![Dashboard](docs/dashboard.png) | ![Services](docs/service-editor.png) |
 
-| Setup Wizard | Bookmarks Editor |
+| Bookmarks Editor | Settings |
 |---|---|
-| ![Setup](https://placehold.co/480x280/0d1117/f0883e?text=Setup+Wizard) | ![Bookmarks](https://placehold.co/480x280/0d1117/a371f7?text=Bookmarks+Editor) |
+| ![Bookmarks](docs/bookmarks-editor.png) | ![Settings](docs/settings.png) |
 
 ---
 

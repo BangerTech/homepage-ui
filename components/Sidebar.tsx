@@ -4,8 +4,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, Server, Bookmark, Puzzle,
-  Settings, Code2, ExternalLink, Sparkles,
+  Settings, Code2, ExternalLink, Sparkles, Home,
 } from "lucide-react";
+import { useEffect, useState } from "react";
 
 const navItems = [
   { href: "/",          label: "Dashboard",      icon: LayoutDashboard, color: "#3b82f6" },
@@ -18,6 +19,14 @@ const navItems = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const [homepageUrl, setHomepageUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/app-settings")
+      .then((r) => r.json())
+      .then((d) => { if (d.homepageUrl) setHomepageUrl(d.homepageUrl); })
+      .catch(() => {});
+  }, []);
 
   return (
     <aside style={{
@@ -155,19 +164,47 @@ export default function Sidebar() {
       <div style={{ height: 1, background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.05), transparent)", margin: "0 16px" }} />
 
       {/* Footer */}
-      <div style={{ padding: "14px 16px" }}>
+      <div style={{ padding: "12px 10px", display: "flex", flexDirection: "column", gap: 4 }}>
+        {homepageUrl && (
+          <a
+            href={homepageUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: "flex", alignItems: "center", gap: 10,
+              padding: "9px 12px", borderRadius: 9,
+              textDecoration: "none", fontSize: 13.5, fontWeight: 600,
+              color: "#34d399",
+              background: "rgba(16,185,129,0.08)",
+              border: "1px solid rgba(16,185,129,0.2)",
+              transition: "all 0.18s",
+            }}
+            onMouseEnter={(e) => {
+              const el = e.currentTarget as HTMLElement;
+              el.style.background = "rgba(16,185,129,0.15)";
+              el.style.borderColor = "rgba(16,185,129,0.35)";
+            }}
+            onMouseLeave={(e) => {
+              const el = e.currentTarget as HTMLElement;
+              el.style.background = "rgba(16,185,129,0.08)";
+              el.style.borderColor = "rgba(16,185,129,0.2)";
+            }}
+          >
+            <div style={{ width: 28, height: 28, borderRadius: 7, background: "rgba(16,185,129,0.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <Home size={14} color="#34d399" />
+            </div>
+            Open Homepage
+            <ExternalLink size={11} style={{ marginLeft: "auto", opacity: 0.6 }} />
+          </a>
+        )}
         <a
           href="https://gethomepage.dev"
           target="_blank"
           rel="noopener noreferrer"
           style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            fontSize: 12,
-            color: "#4a5568",
-            textDecoration: "none",
-            transition: "color 0.15s",
+            display: "flex", alignItems: "center", gap: 6,
+            padding: "6px 12px",
+            fontSize: 12, color: "#4a5568", textDecoration: "none", transition: "color 0.15s",
           }}
           onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#7d8fa3"; }}
           onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#4a5568"; }}

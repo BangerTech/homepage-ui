@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import { CheckCircle, XCircle, Loader2, Trash2, Plus } from "lucide-react";
+import { useState, useCallback, useRef } from "react";
+import { CheckCircle, XCircle, Loader2, Trash2, Plus, Download, Upload, RotateCcw } from "lucide-react";
 import SaveBar from "@/components/SaveBar";
 import type { HomepageSettings, AppSettings } from "@/types";
 
@@ -490,14 +490,179 @@ export default function SettingsClient({ initialSettings, initialAppSettings, lo
             {dockerTest === "ok" && <div style={{ color: "#3fb950", fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}><CheckCircle size={12} /> Container found</div>}
             {dockerTest === "error" && <div style={{ color: "#f85149", fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}><XCircle size={12} /> {dockerError}</div>}
           </Field>
+
+          <Field label="Homepage URL" hint="Optional — shows an 'Open Homepage' button in the sidebar">
+            <input
+              type="text"
+              value={appSettings.homepageUrl || ""}
+              onChange={(e) => { setAppSettings({ ...appSettings, homepageUrl: e.target.value }); setHasChanges(true); }}
+              style={{ width: "100%", height: 36 }}
+              placeholder="http://192.168.1.100:3000"
+            />
+          </Field>
         </div>
       </div>
+
+      {/* ── Backup & Restore ── */}
+      <BackupRestore />
 
       <SaveBar onSave={handleSave} hasChanges={hasChanges} />
 
       <style>{`
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>
+    </div>
+  );
+}
+
+type BackupStatus = "idle" | "loading" | "ok" | "error";
+
+function BackupRestore() {
+  const [exportStatus, setExportStatus] = useState<BackupStatus>("idle");
+  const [importStatus, setImportStatus] = useState<BackupStatus>("idle");
+  const [importMsg, setImportMsg]       = useState("");
+  const [importError, setImportError]   = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  async function handleExport() {
+    setExportStatus("loading");
+    try {
+      const res = await fetch("/api/config/backup");
+      if (!res.ok) throw new Error("Export failed");
+      const blob = await res.blob();
+      const cd   = res.headers.get("Content-Disposition") || "";
+      const name = cd.match(/filename="?([^"]+)"?/)?.[1] || "homepage-backup.zip";
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href = url; a.download = name; a.click();
+      URL.revokeObjectURL(url);
+      setExportStatus("ok");
+      setTimeout(() => setExportStatus("idle"), 3000);
+    } catch (e) {
+      setExportStatus("error");
+      setTimeout(() => setExportStatus("idle"), 4000);
+    }
+  }
+
+  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.name.endsWith(".zip")) {
+      setImportError("Please select a .zip backup file"); setImportStatus("error");
+      setTimeout(() => setImportStatus("idle"), 4000); return;
+    }
+    setImportStatus("loading"); setImportMsg(""); setImportError("");
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res  = await fetch("/api/config/restore", { method: "POST", body: fd });
+      const data = await res.json();
+      if (data.ok) {
+        setImportStatus("ok");
+        setImportMsg(`Restored: ${(data.restored as string[]).join(", ")}`);
+        setTimeout(() => setImportStatus("idle"), 5000);
+      } else {
+        setImportStatus("error"); setImportError(data.error || "Restore failed");
+        setTimeout(() => setImportStatus("idle"), 5000);
+      }
+    } catch (e) {
+      setImportStatus("error"); setImportError(String(e));
+      setTimeout(() => setImportStatus("idle"), 5000);
+    }
+    if (fileRef.current) fileRef.current.value = "";
+  }
+
+  return (
+    <div style={{ padding: "0 32px 32px" }}>
+      <div className="glass-card" style={{ padding: "22px 24px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+          <div style={{ width: 32, height: 32, borderRadius: 8, background: "linear-gradient(135deg, #6366f1, #8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <RotateCcw size={15} color="#fff" />
+          </div>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 15, color: "#e2e8f0" }}>Backup &amp; Restore</div>
+            <div style={{ fontSize: 12, color: "#4a5568", marginTop: 1 }}>Export all config files as ZIP or restore from a backup</div>
+          </div>
+        </div>
+
+        <div style={{ height: 1, background: "rgba(255,255,255,0.05)", margin: "14px 0" }} />
+
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          {/* Export */}
+          <button
+            onClick={handleExport}
+            disabled={exportStatus === "loading"}
+            style={{
+              display: "flex", alignItems: "center", gap: 8,
+              padding: "10px 20px", borderRadius: 9, border: "none",
+              background: exportStatus === "ok"
+                ? "linear-gradient(135deg, #064e3b, #065f46)"
+                : "linear-gradient(135deg, #3730a3, #4338ca)",
+              color: exportStatus === "ok" ? "#34d399" : "#fff",
+              fontWeight: 600, fontSize: 13,
+              cursor: exportStatus === "loading" ? "not-allowed" : "pointer",
+              boxShadow: "0 4px 14px rgba(99,102,241,0.3), inset 0 1px 0 rgba(255,255,255,0.1)",
+              transition: "all 0.2s",
+            }}
+          >
+            {exportStatus === "loading"
+              ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />
+              : exportStatus === "ok"
+              ? <CheckCircle size={14} />
+              : <Download size={14} />}
+            {exportStatus === "loading" ? "Exporting..." : exportStatus === "ok" ? "Downloaded!" : "Export Backup (.zip)"}
+          </button>
+
+          {/* Import */}
+          <label style={{ cursor: "pointer" }}>
+            <input ref={fileRef} type="file" accept=".zip" onChange={handleImport} style={{ display: "none" }} />
+            <div
+              style={{
+                display: "flex", alignItems: "center", gap: 8,
+                padding: "10px 20px", borderRadius: 9,
+                border: "1px solid rgba(245,158,11,0.3)",
+                background: importStatus === "ok"
+                  ? "rgba(5,150,105,0.15)"
+                  : importStatus === "error"
+                  ? "rgba(239,68,68,0.1)"
+                  : "rgba(245,158,11,0.08)",
+                color: importStatus === "ok" ? "#34d399"
+                     : importStatus === "error" ? "#f87171" : "#fbbf24",
+                fontWeight: 600, fontSize: 13,
+                cursor: importStatus === "loading" ? "not-allowed" : "pointer",
+                transition: "all 0.2s",
+                userSelect: "none",
+              }}
+            >
+              {importStatus === "loading"
+                ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />
+                : importStatus === "ok"
+                ? <CheckCircle size={14} />
+                : importStatus === "error"
+                ? <XCircle size={14} />
+                : <Upload size={14} />}
+              {importStatus === "loading" ? "Restoring..."
+               : importStatus === "ok"    ? "Restored!"
+               : importStatus === "error" ? "Failed"
+               : "Import Backup (.zip)"}
+            </div>
+          </label>
+        </div>
+
+        {importMsg && (
+          <div style={{ marginTop: 10, fontSize: 12, color: "#34d399", display: "flex", alignItems: "center", gap: 6 }}>
+            <CheckCircle size={12} /> {importMsg}
+          </div>
+        )}
+        {importError && (
+          <div style={{ marginTop: 10, fontSize: 12, color: "#f87171", display: "flex", alignItems: "center", gap: 6 }}>
+            <XCircle size={12} /> {importError}
+          </div>
+        )}
+        <div style={{ marginTop: 12, fontSize: 12, color: "#4a5568" }}>
+          Backup includes: <code style={{ color: "#7d8fa3" }}>services.yaml · bookmarks.yaml · widgets.yaml · settings.yaml · custom.css · custom.js</code>
+        </div>
+      </div>
     </div>
   );
 }
