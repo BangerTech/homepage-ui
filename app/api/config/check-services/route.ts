@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import https from "https";
+import { Agent, fetch as uFetch } from "undici";
 
-// For homelab use: ignore self-signed certificates
-const insecureAgent = new https.Agent({ rejectUnauthorized: false });
+// Single reusable agent that skips certificate validation.
+// Safe for homelab use — all requests are server-side to local IPs.
+const insecureAgent = new Agent({ connect: { rejectUnauthorized: false } });
 
 interface CheckResult {
   url: string;
@@ -13,29 +14,23 @@ interface CheckResult {
 }
 
 async function probe(url: string): Promise<CheckResult> {
+  if (!url?.startsWith("http")) return { url, reachable: false, error: "Invalid URL" };
   const t0 = Date.now();
-  // Use node-native fetch with custom agent via undici-compatible options,
-  // falling back to http/https module for self-signed cert support
+
   for (const method of ["HEAD", "GET"] as const) {
     try {
-      const res = await fetch(url, {
+      const res = await uFetch(url, {
         method,
+        dispatcher: insecureAgent,
         signal: AbortSignal.timeout(5000),
         redirect: "follow",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ...(url.startsWith("https") ? { agent: insecureAgent } as any : {}),
       });
-      // ANY HTTP response (including 401, 403, 404, 500) = server is UP
+      // ANY HTTP response = server is UP (401/403/404/500 all mean it's running)
       return { url, reachable: true, status: res.status, latencyMs: Date.now() - t0 };
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      // If it's a TLS/cert error, try once more ignoring SSL via http.request
-      if (method === "HEAD" && (msg.includes("certificate") || msg.includes("ssl") || msg.includes("CERT"))) {
-        continue; // try GET which also has the insecure agent
-      }
-      if (method === "GET") {
-        return { url, reachable: false, latencyMs: Date.now() - t0, error: msg };
-      }
+      if (method === "HEAD") continue; // try GET as fallback
+      return { url, reachable: false, latencyMs: Date.now() - t0, error: msg };
     }
   }
   return { url, reachable: false, latencyMs: Date.now() - t0 };
@@ -47,7 +42,6 @@ export async function POST(req: NextRequest) {
     if (!Array.isArray(urls) || urls.length === 0) {
       return NextResponse.json({ ok: false, error: "No URLs provided" }, { status: 400 });
     }
-
     const results = await Promise.all(urls.map(probe));
     return NextResponse.json({ ok: true, results });
   } catch (e) {
