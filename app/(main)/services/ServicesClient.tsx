@@ -1,13 +1,14 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
+import type { ReactNode } from "react";
 import {
-  DndContext, closestCenter, PointerSensor, useSensor, useSensors,
+  DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors,
   DragEndEvent,
 } from "@dnd-kit/core";
 import {
   SortableContext, verticalListSortingStrategy,
-  useSortable, arrayMove,
+  useSortable, sortableKeyboardCoordinates,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
@@ -18,18 +19,22 @@ import {
 import SaveBar from "@/components/SaveBar";
 import IconPicker from "@/components/IconPicker";
 import { useReachability } from "@/components/ReachabilityProvider";
+import {
+  deleteServiceByEditorId,
+  identifyServiceGroups,
+  reorderServiceGroups,
+  reorderServiceLayout,
+  reorderServices,
+  replaceServiceByEditorId,
+  serializeServiceGroups,
+} from "@/lib/serviceGroups";
+import type {
+  IdentifiedService,
+  IdentifiedServiceGroup,
+} from "@/lib/serviceGroups";
 import type { ServiceGroup, Service } from "@/types";
 
 interface Props { initialGroups: ServiceGroup[]; loadError: string; }
-
-function serializeGroups(groups: ServiceGroup[]): unknown[] {
-  return groups.map((g) => ({
-    [g.name]: g.services.map((s) => {
-      const { name, ...rest } = s;
-      return { [name]: rest };
-    }),
-  }));
-}
 
 const EMPTY_SERVICE: Service = { name: "", icon: "", href: "", description: "", id: "" };
 const CDN = (n: string) => `https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons@main/png/${n.replace(".png",""  )}.png`;
@@ -183,15 +188,14 @@ function ServiceForm({ service, onSave, onCancel }: { service: Service; onSave: 
 
 /* ── Sortable service row ── */
 function SortableServiceRow({
-  service, groupIdx, serviceIdx,
-  onEdit, onDelete, reachStatus,
+  service, onEdit, onDelete, reachStatus,
 }: {
-  service: Service; groupIdx: number; serviceIdx: number;
+  service: IdentifiedService;
   onEdit: () => void; onDelete: () => void;
   reachStatus?: "checking" | "ok" | "error";
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: `${groupIdx}-${serviceIdx}-${service.name}`,
+    id: service.editorId,
   });
   const iconName = service.icon?.replace(".png", "") || "";
   const isUrl    = service.icon?.startsWith("http");
@@ -212,9 +216,21 @@ function SortableServiceRow({
       onMouseEnter={(e) => { if (!isDragging) (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.04)"; }}
       onMouseLeave={(e) => { if (!isDragging) (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.02)"; }}
     >
-      <div {...attributes} {...listeners} style={{ cursor: "grab", flexShrink: 0, color: "#4a5568", touchAction: "none" }}>
+      <button
+        type="button"
+        aria-label={`Reorder service ${service.name}`}
+        title="Drag to reorder service"
+        {...attributes}
+        {...listeners}
+        style={{
+          width: 24, height: 28, padding: 0,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          border: "none", background: "transparent",
+          cursor: "grab", flexShrink: 0, color: "#4a5568", touchAction: "none",
+        }}
+      >
         <GripVertical size={14} />
-      </div>
+      </button>
 
       {/* icon preview */}
       <div style={{ width: 28, height: 28, borderRadius: 6, background: "rgba(255,255,255,0.04)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden" }}>
@@ -264,84 +280,197 @@ function SortableServiceRow({
   );
 }
 
+/* ── Sortable service group ── */
+function SortableGroupCard({ id, label, children }: { id: string; label: string; children: ReactNode }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className="glass-card"
+      style={{
+        position: "relative",
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.5 : 1,
+        zIndex: isDragging ? 1 : "auto",
+        marginBottom: 14,
+        overflow: "hidden",
+      }}
+    >
+      <button
+        type="button"
+        aria-label={`Reorder group ${label}`}
+        title="Drag to reorder group"
+        {...attributes}
+        {...listeners}
+        onClick={(event) => event.stopPropagation()}
+        style={{
+          position: "absolute", top: 13, left: 14, zIndex: 2,
+          width: 26, height: 30, padding: 0,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          border: "none", background: "transparent", color: "#4a5568",
+          cursor: isDragging ? "grabbing" : "grab", touchAction: "none",
+        }}
+      >
+        <GripVertical size={15} />
+      </button>
+      {children}
+    </div>
+  );
+}
+
 /* ── Main component ── */
 export default function ServicesClient({ initialGroups, loadError }: Props) {
-  const [groups, setGroups]             = useState<ServiceGroup[]>(initialGroups);
-  const [expandedGroups, setExpanded]   = useState<Set<string>>(new Set(initialGroups.map((g) => g.name)));
-  const [editingService, setEditing]    = useState<{ groupIdx: number; serviceIdx: number | null } | null>(null);
+  const [groups, setGroups]             = useState<IdentifiedServiceGroup[]>(() => identifyServiceGroups(initialGroups));
+  const [expandedGroups, setExpanded]   = useState<Set<string>>(() => new Set(initialGroups.map((_, index) => `service-group-${index}`)));
+  const nextGroupId                     = useRef(initialGroups.length);
+  const nextServiceId                   = useRef(initialGroups.reduce((total, group) => total + group.services.length, 0));
+  const [editingService, setEditing]    = useState<{ groupId: string; serviceId: string | null } | null>(null);
   const [addingGroup, setAddingGroup]   = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
   const [hasChanges, setHasChanges]     = useState(false);
-  const [renamingGroup, setRenaming]    = useState<number | null>(null);
+  const [groupOrderChanged, setGroupOrderChanged] = useState(false);
+  const [renamingGroup, setRenaming]    = useState<string | null>(null);
   const [renameValue, setRenameValue]   = useState("");
   const { reachability, isChecking, lastChecked, triggerCheck } = useReachability();
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
-  function toggleGroup(name: string) {
-    setExpanded((prev) => { const s = new Set(prev); s.has(name) ? s.delete(name) : s.add(name); return s; });
+  function toggleGroup(groupId: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
   }
 
   function addGroup() {
     if (!newGroupName.trim()) return;
-    setGroups((p) => [...p, { name: newGroupName.trim(), services: [] }]);
-    setExpanded((p) => new Set([...p, newGroupName.trim()]));
+    const editorId = `service-group-${nextGroupId.current++}`;
+    setGroups((p) => [...p, { editorId, name: newGroupName.trim(), services: [] }]);
+    setExpanded((p) => new Set([...p, editorId]));
     setNewGroupName(""); setAddingGroup(false); setHasChanges(true);
   }
 
-  function deleteGroup(idx: number) {
-    if (!confirm(`Delete group "${groups[idx].name}" and all its services?`)) return;
-    setGroups((p) => p.filter((_, i) => i !== idx)); setHasChanges(true);
+  function deleteGroup(groupId: string) {
+    const group = groups.find((candidate) => candidate.editorId === groupId);
+    if (!group || !confirm(`Delete group "${group.name}" and all its services?`)) return;
+    setGroups((p) => p.filter((candidate) => candidate.editorId !== groupId));
+    setExpanded((p) => { const next = new Set(p); next.delete(groupId); return next; });
+    if (editingService?.groupId === groupId) setEditing(null);
+    if (renamingGroup === groupId) setRenaming(null);
+    setHasChanges(true);
   }
 
   function saveService(service: Service) {
     if (!editingService) return;
-    const { groupIdx, serviceIdx } = editingService;
-    setGroups((p) => p.map((g, gi) => {
-      if (gi !== groupIdx) return g;
-      const svcs = [...g.services];
-      serviceIdx === null ? svcs.push(service) : (svcs[serviceIdx] = service);
-      return { ...g, services: svcs };
+    const { groupId, serviceId } = editingService;
+    setGroups((current) => current.map((group) => {
+      if (group.editorId !== groupId) return group;
+      if (serviceId === null) {
+        return {
+          ...group,
+          services: [
+            ...group.services,
+            { ...service, editorId: `service-${nextServiceId.current++}` },
+          ],
+        };
+      }
+      return {
+        ...group,
+        services: replaceServiceByEditorId(group.services, serviceId, service),
+      };
     }));
     setEditing(null); setHasChanges(true);
   }
 
-  function deleteService(groupIdx: number, serviceIdx: number) {
-    if (!confirm(`Delete service "${groups[groupIdx].services[serviceIdx].name}"?`)) return;
-    setGroups((p) => p.map((g, gi) => gi === groupIdx ? { ...g, services: g.services.filter((_, si) => si !== serviceIdx) } : g));
+  function deleteService(groupId: string, serviceId: string) {
+    const group = groups.find((candidate) => candidate.editorId === groupId);
+    const service = group?.services.find((candidate) => candidate.editorId === serviceId);
+    if (!service || !confirm(`Delete service "${service.name}"?`)) return;
+    setGroups((current) => current.map((candidate) => candidate.editorId === groupId
+      ? { ...candidate, services: deleteServiceByEditorId(candidate.services, serviceId) }
+      : candidate));
+    if (editingService?.groupId === groupId && editingService.serviceId === serviceId) setEditing(null);
     setHasChanges(true);
   }
 
-  function commitRename(idx: number) {
+  function commitRename(groupId: string) {
     if (!renameValue.trim()) return;
-    const old = groups[idx].name;
-    setGroups((p) => p.map((g, i) => i === idx ? { ...g, name: renameValue.trim() } : g));
-    setExpanded((p) => { const s = new Set(p); if (s.has(old)) { s.delete(old); s.add(renameValue.trim()); } return s; });
+    setGroups((p) => p.map((g) => g.editorId === groupId ? { ...g, name: renameValue.trim() } : g));
     setRenaming(null); setHasChanges(true);
   }
 
-  function handleServiceDragEnd(event: DragEndEvent, groupIdx: number) {
+  function handleServiceDragEnd(event: DragEndEvent, groupId: string) {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    setGroups((p) => p.map((g, gi) => {
-      if (gi !== groupIdx) return g;
-      const ids  = g.services.map((_, si) => `${gi}-${si}-${g.services[si].name}`);
-      const from = ids.indexOf(String(active.id));
-      const to   = ids.indexOf(String(over.id));
-      if (from === -1 || to === -1) return g;
-      return { ...g, services: arrayMove(g.services, from, to) };
-    }));
+    setGroups((current) => current.map((group) => group.editorId === groupId
+      ? {
+          ...group,
+          services: reorderServices(group.services, String(active.id), String(over.id)),
+        }
+      : group));
+    setHasChanges(true);
+  }
+
+  function handleGroupDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    setGroups((current) => reorderServiceGroups(current, String(active.id), String(over.id)));
+    setGroupOrderChanged(true);
     setHasChanges(true);
   }
 
   const handleSave = useCallback(async () => {
-    const res = await fetch("/api/config/services", {
+    let reorderedSettings: Record<string, unknown> | null = null;
+
+    if (groupOrderChanged) {
+      const settingsResponse = await fetch("/api/config/settings");
+      const settingsPayload = await settingsResponse.json() as { data?: unknown; error?: string };
+      if (!settingsResponse.ok) {
+        throw new Error(settingsPayload.error || "Could not read settings before saving group order");
+      }
+
+      if (settingsPayload.data && typeof settingsPayload.data === "object" && !Array.isArray(settingsPayload.data)) {
+        const settings = settingsPayload.data as Record<string, unknown>;
+        const layout = settings.layout;
+        if (layout && typeof layout === "object" && !Array.isArray(layout)) {
+          reorderedSettings = {
+            ...settings,
+            layout: reorderServiceLayout(layout as Record<string, unknown>, groups),
+          };
+        }
+      }
+    }
+
+    const servicesResponse = await fetch("/api/config/services", {
       method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ data: serializeGroups(groups) }),
+      body: JSON.stringify({ data: serializeServiceGroups(groups) }),
     });
-    if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Save failed"); }
+    if (!servicesResponse.ok) {
+      const data = await servicesResponse.json();
+      throw new Error(data.error || "Save failed");
+    }
+
+    if (reorderedSettings) {
+      const settingsResponse = await fetch("/api/config/settings", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: reorderedSettings }),
+      });
+      if (!settingsResponse.ok) {
+        const data = await settingsResponse.json();
+        throw new Error(data.error || "Services saved, but Homepage layout order could not be updated");
+      }
+    }
+
+    setGroupOrderChanged(false);
     setHasChanges(false);
-  }, [groups]);
+  }, [groupOrderChanged, groups]);
 
   return (
     <div style={{ paddingBottom: 80 }}>
@@ -407,31 +536,33 @@ export default function ServicesClient({ initialGroups, loadError }: Props) {
         )}
 
         {/* Groups */}
-        {groups.map((group, groupIdx) => {
-          const expanded = expandedGroups.has(group.name);
-          const sortIds  = group.services.map((_, si) => `${groupIdx}-${si}-${group.services[si].name}`);
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleGroupDragEnd}>
+          <SortableContext items={groups.map((group) => group.editorId)} strategy={verticalListSortingStrategy}>
+            {groups.map((group) => {
+              const expanded = expandedGroups.has(group.editorId);
+              const sortIds  = group.services.map((service) => service.editorId);
 
-          return (
-            <div key={groupIdx} className="glass-card" style={{ marginBottom: 14, overflow: "hidden" }}>
+              return (
+                <SortableGroupCard key={group.editorId} id={group.editorId} label={group.name}>
               {/* Group header */}
               <div
                 style={{
-                  display: "flex", alignItems: "center", padding: "14px 18px",
+                  display: "flex", alignItems: "center", padding: "14px 18px 14px 48px",
                   cursor: "pointer", userSelect: "none",
                   borderBottom: expanded ? "1px solid rgba(255,255,255,0.05)" : "none",
                   background: expanded ? "rgba(255,255,255,0.02)" : "transparent",
                   transition: "background 0.15s",
                 }}
-                onClick={() => toggleGroup(group.name)}
+                onClick={() => toggleGroup(group.editorId)}
               >
                 <div style={{ display: "flex", alignItems: "center", flex: 1, gap: 10 }}>
                   {expanded
                     ? <ChevronDown size={15} color="#4a5568" />
                     : <ChevronRight size={15} color="#4a5568" />}
 
-                  {renamingGroup === groupIdx ? (
+                  {renamingGroup === group.editorId ? (
                     <input autoFocus value={renameValue} onChange={(e) => setRenameValue(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") commitRename(groupIdx); if (e.key === "Escape") setRenaming(null); }}
+                      onKeyDown={(e) => { if (e.key === "Enter") commitRename(group.editorId); if (e.key === "Escape") setRenaming(null); }}
                       onClick={(e) => e.stopPropagation()} style={{ height: 30, fontSize: 15, fontWeight: 700 }} />
                   ) : (
                     <span style={{ fontSize: 15, fontWeight: 700, color: "#e2e8f0" }}>{group.name}</span>
@@ -443,13 +574,13 @@ export default function ServicesClient({ initialGroups, loadError }: Props) {
                 </div>
 
                 <div style={{ display: "flex", gap: 5 }} onClick={(e) => e.stopPropagation()}>
-                  <button onClick={() => setEditing({ groupIdx, serviceIdx: null })} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 11px", borderRadius: 7, border: "1px solid rgba(59,130,246,0.2)", background: "rgba(59,130,246,0.08)", color: "#60a5fa", fontSize: 12 }}>
+                  <button onClick={() => setEditing({ groupId: group.editorId, serviceId: null })} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 11px", borderRadius: 7, border: "1px solid rgba(59,130,246,0.2)", background: "rgba(59,130,246,0.08)", color: "#60a5fa", fontSize: 12 }}>
                     <Plus size={12} /> Add
                   </button>
-                  <button onClick={() => { setRenaming(groupIdx); setRenameValue(group.name); }} style={{ padding: "5px 8px", borderRadius: 7, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: "#7d8fa3" }}>
+                  <button onClick={() => { setRenaming(group.editorId); setRenameValue(group.name); }} style={{ padding: "5px 8px", borderRadius: 7, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: "#7d8fa3" }}>
                     <Pencil size={12} />
                   </button>
-                  <button onClick={() => deleteGroup(groupIdx)} style={{ padding: "5px 8px", borderRadius: 7, border: "1px solid rgba(239,68,68,0.15)", background: "transparent", color: "#ef4444", opacity: 0.7 }}>
+                  <button onClick={() => deleteGroup(group.editorId)} style={{ padding: "5px 8px", borderRadius: 7, border: "1px solid rgba(239,68,68,0.15)", background: "transparent", color: "#ef4444", opacity: 0.7 }}>
                     <Trash2 size={12} />
                   </button>
                 </div>
@@ -458,21 +589,21 @@ export default function ServicesClient({ initialGroups, loadError }: Props) {
               {/* Services */}
               {expanded && (
                 <div style={{ padding: "10px 14px" }}>
-                  {editingService?.groupIdx === groupIdx && editingService.serviceIdx === null && (
+                  {editingService?.groupId === group.editorId && editingService.serviceId === null && (
                     <ServiceForm service={EMPTY_SERVICE} onSave={saveService} onCancel={() => setEditing(null)} />
                   )}
 
-                  <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(e) => handleServiceDragEnd(e, groupIdx)}>
+                  <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(e) => handleServiceDragEnd(e, group.editorId)}>
                     <SortableContext items={sortIds} strategy={verticalListSortingStrategy}>
-                      {group.services.map((service, serviceIdx) =>
-                        editingService?.groupIdx === groupIdx && editingService.serviceIdx === serviceIdx ? (
-                          <ServiceForm key={serviceIdx} service={service} onSave={saveService} onCancel={() => setEditing(null)} />
+                      {group.services.map((service) =>
+                        editingService?.groupId === group.editorId && editingService.serviceId === service.editorId ? (
+                          <ServiceForm key={service.editorId} service={service} onSave={saveService} onCancel={() => setEditing(null)} />
                         ) : (
                           <SortableServiceRow
-                            key={`${groupIdx}-${serviceIdx}-${service.name}`}
-                            service={service} groupIdx={groupIdx} serviceIdx={serviceIdx}
-                            onEdit={() => setEditing({ groupIdx, serviceIdx })}
-                            onDelete={() => deleteService(groupIdx, serviceIdx)}
+                            key={service.editorId}
+                            service={service}
+                            onEdit={() => setEditing({ groupId: group.editorId, serviceId: service.editorId })}
+                            onDelete={() => deleteService(group.editorId, service.editorId)}
                             reachStatus={service.href ? reachability[service.href] : undefined}
                           />
                         )
@@ -480,19 +611,21 @@ export default function ServicesClient({ initialGroups, loadError }: Props) {
                     </SortableContext>
                   </DndContext>
 
-                  {group.services.length === 0 && !(editingService?.groupIdx === groupIdx && editingService.serviceIdx === null) && (
+                  {group.services.length === 0 && !(editingService?.groupId === group.editorId && editingService.serviceId === null) && (
                     <div style={{ textAlign: "center", padding: "20px 0", color: "#4a5568", fontSize: 13 }}>
                       No services yet.{" "}
-                      <button onClick={() => setEditing({ groupIdx, serviceIdx: null })} style={{ background: "none", border: "none", color: "#3b82f6", cursor: "pointer", fontSize: 13, padding: 0 }}>
+                      <button onClick={() => setEditing({ groupId: group.editorId, serviceId: null })} style={{ background: "none", border: "none", color: "#3b82f6", cursor: "pointer", fontSize: 13, padding: 0 }}>
                         Add one
                       </button>
                     </div>
                   )}
                 </div>
               )}
-            </div>
-          );
-        })}
+                </SortableGroupCard>
+              );
+            })}
+          </SortableContext>
+        </DndContext>
 
         {groups.length === 0 && !loadError && (
           <div style={{ textAlign: "center", padding: 60, color: "#4a5568" }}>
