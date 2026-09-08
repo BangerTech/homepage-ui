@@ -108,6 +108,16 @@ volumes:
   homepage-ui-data:
 ```
 
+### Image tags
+
+| Tag | When |
+|---|---|
+| `latest` | Latest build from `main` |
+| `X.Y.Z` / `X.Y` | Git tags like `v0.3.1` |
+| `sha-<short>` | Every published commit |
+
+Multi-arch: `linux/amd64` and `linux/arm64`.
+
 ---
 
 ## Tech Stack
